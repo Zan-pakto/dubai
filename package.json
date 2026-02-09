@@ -1,10 +1,11 @@
 {
   "name": "dubai",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Sharaf DG Product Scraper API",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node server.js",
+    "scrape": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,6 +14,7 @@
   "type": "module",
   "dependencies": {
     "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
     "express": "^5.2.1",
     "node-fetch": "^3.3.2",
     "puppeteer": "^24.37.2"
