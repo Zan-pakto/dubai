@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import Image from "next/image";
 
 interface Product {
@@ -28,6 +29,12 @@ export default function Home() {
   const [isCached, setIsCached] = useState(false);
 
   const API_URL = "http://localhost:3001";
+
+  // Proxy image URL through our backend to avoid hotlinking issues
+  const getProxiedImage = (imageUrl: string) => {
+    if (!imageUrl) return "";
+    return `${API_URL}/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+  };
 
   const fetchProducts = async (forceRefresh = false) => {
     try {
@@ -163,6 +170,17 @@ export default function Home() {
                 )}
               </div>
 
+              <Link
+                href="/demo"
+                className="refresh-button"
+                style={{ textDecoration: "none", background: "linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.2))", borderColor: "rgba(245, 158, 11, 0.4)", color: "#fbbf24" }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+                PriceWatch Demo
+              </Link>
+
               <button
                 onClick={() => fetchProducts(true)}
                 disabled={refreshing}
@@ -204,10 +222,21 @@ export default function Home() {
                   <div className="product-image-container">
                     {product.image ? (
                       <img
-                        src={product.image}
+                        src={getProxiedImage(product.image)}
                         alt={product.title}
                         className="product-image"
                         loading="lazy"
+                        onError={(e) => {
+                          // If proxy fails, try direct URL as fallback
+                          const target = e.target as HTMLImageElement;
+                          if (target.src.includes('/api/image-proxy')) {
+                            target.src = product.image;
+                          } else {
+                            // Show placeholder if both fail
+                            target.style.display = 'none';
+                            target.parentElement!.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;opacity:0.3"><svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>';
+                          }
+                        }}
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full">

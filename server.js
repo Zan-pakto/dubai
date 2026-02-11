@@ -107,7 +107,9 @@ async function scrapeProducts() {
         price = price.split(/\s+D\s+/)[0]?.replace(/^D\s*/, "AED ") || price;
 
         const img = container.querySelector("img");
-        const image = img?.src || img?.getAttribute("data-src") || "";
+        let image = img?.src || img?.getAttribute("data-src") || "";
+        // Fix protocol-relative URLs
+        if (image.startsWith("//")) image = "https:" + image;
 
         if (title || price) {
           results.push({
@@ -186,6 +188,37 @@ app.get("/api/products/refresh", async (req, res) => {
   }
 });
 
+// Image proxy to avoid hotlinking issues with Sharaf DG images
+app.get("/api/image-proxy", async (req, res) => {
+  try {
+    const imageUrl = req.query.url;
+    if (!imageUrl) {
+      return res.status(400).json({ error: "Missing url parameter" });
+    }
+
+    const response = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": "https://uae.sharafdg.com/",
+        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8"
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: "Failed to fetch image" });
+    }
+
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 24 hours
+
+    const arrayBuffer = await response.arrayBuffer();
+    res.send(Buffer.from(arrayBuffer));
+  } catch (error) {
+    res.status(500).json({ error: "Image proxy error" });
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -195,4 +228,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📦 Products API: http://localhost:${PORT}/api/products`);
+  console.log(`🖼️  Image Proxy: http://localhost:${PORT}/api/image-proxy?url=...`);
 });
