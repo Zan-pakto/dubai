@@ -203,9 +203,14 @@ export default function DemoDashboard() {
     [API_URL, buildTrackedProducts, showToast, trackedProducts]
   );
 
-  // Initial fetch
+  // Initial fetch & URL parameter parsing
   useEffect(() => {
     fetchProducts();
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get("q");
+      if (q) setSearchQuery(q);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -793,20 +798,58 @@ export default function DemoDashboard() {
                     </div>
                   )}
                   <div className="product-card-info">
-                    <div className="product-source-label">
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
+                    <div className="product-source-header-row">
+                      <div className="product-source-label">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                          <path d="M2 17l10 5 10-5" />
+                          <path d="M2 12l10 5 10-5" />
+                        </svg>
+                        {tracked.scraped.source || "Sharaf DG"}
+                      </div>
+                      
+                      {/* Share Button */}
+                      <button
+                        className="share-btn"
+                        title="Share Product"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const internalShareUrl = `${window.location.origin}${window.location.pathname}?q=${encodeURIComponent(tracked.scraped.title)}`;
+                          
+                          if (navigator.share) {
+                            navigator.share({
+                              title: `Price Comparison: ${tracked.scraped.title}`,
+                              text: `Check out our price comparison against ${tracked.scraped.source || 'competitors'} for this product!`,
+                              url: internalShareUrl,
+                            }).catch(() => console.log('Share dismissed.'));
+                          } else {
+                            navigator.clipboard.writeText(internalShareUrl);
+                            showToast("Dashboard link copied to clipboard!");
+                          }
+                        }}
                       >
-                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                        <path d="M2 17l10 5 10-5" />
-                        <path d="M2 12l10 5 10-5" />
-                      </svg>
-                      {tracked.scraped.source || "Sharaf DG"}
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <circle cx="18" cy="5" r="3" />
+                          <circle cx="6" cy="12" r="3" />
+                          <circle cx="18" cy="19" r="3" />
+                          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                        </svg>
+                      </button>
                     </div>
                     <h3 className="product-card-title">
                       {tracked.scraped.title}

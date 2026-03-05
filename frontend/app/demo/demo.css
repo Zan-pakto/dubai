@@ -547,6 +547,13 @@
   min-width: 0;
 }
 
+.product-source-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
 .product-source-label {
   display: inline-flex;
   align-items: center;
@@ -560,6 +567,26 @@
   background: #f5f3ff;
   border-radius: 100px;
   width: fit-content;
+}
+
+.share-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.share-btn:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-color: #cbd5e1;
 }
 
 .product-card-title {
