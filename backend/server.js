@@ -35,97 +35,182 @@ async function scrapeProducts() {
       ]
     });
 
-    const page = await browser.newPage();
+    const allProducts = [];
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    );
+    // --- Scrape Sharaf DG ---
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      );
+      await page.goto("https://uae.sharafdg.com/c/home_appliances/", {
+        waitUntil: "networkidle2",
+        timeout: 60000
+      });
 
-    const url = "https://uae.sharafdg.com/c/home_appliances/";
-    await page.goto(url, {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
+      await page.waitForFunction(
+        () => {
+          const productLinks = document.querySelectorAll('a[href*="/product/"]');
+          return productLinks.length >= 3;
+        },
+        { timeout: 30000 }
+      ).catch(() => console.log("Timeout waiting for Sharaf DG links"));
 
-    await page.waitForFunction(
-      () => {
-        const productLinks = document.querySelectorAll('a[href*="/product/"]');
-        return productLinks.length >= 3;
-      },
-      { timeout: 30000 }
-    );
-
-    await page.evaluate(async () => {
-      for (let i = 0; i < 6; i++) {
-        window.scrollBy(0, window.innerHeight);
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-    });
-
-    const products = await page.evaluate(() => {
-      const results = [];
-      const seen = new Set();
-
-      const selectors = [
-        '[data-testid="product-card"]',
-        '[class*="product-card"]',
-        '[class*="ProductCard"]',
-        'a[href*="/product/"]'
-      ];
-
-      let cards = [];
-      for (const sel of selectors) {
-        const els = document.querySelectorAll(sel);
-        if (els.length > 0) {
-          cards = [...els];
-          break;
+      await page.evaluate(async () => {
+        for (let i = 0; i < 6; i++) {
+          window.scrollBy(0, window.innerHeight);
+          await new Promise((r) => setTimeout(r, 2000));
         }
-      }
+      });
 
-      for (const card of cards) {
-        const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/product/"]');
-        if (!linkEl) continue;
+      const sharafProducts = await page.evaluate(() => {
+        const results = [];
+        const seen = new Set();
+        const selectors = [
+          '[data-testid="product-card"]',
+          '[class*="product-card"]',
+          '[class*="ProductCard"]',
+          'a[href*="/product/"]'
+        ];
 
-        const url = linkEl.href || linkEl.getAttribute("href") || "";
-        if (!url.includes("/product/") || seen.has(url)) continue;
-        seen.add(url);
-
-        const container = card.matches("a") ? card : card.closest("a") || card;
-
-        const title =
-          container.querySelector("h2")?.innerText?.trim() ||
-          container.querySelector("h3")?.innerText?.trim() ||
-          container.querySelector("h4")?.innerText?.trim() ||
-          container.querySelector("[class*='title']")?.innerText?.trim() ||
-          container.querySelector("[class*='name']")?.innerText?.trim();
-
-        const priceEl =
-          container.querySelector("[data-testid='price']") ||
-          container.querySelector("[class*='price']") ||
-          container.querySelector("[class*='Price']");
-        let price = priceEl?.innerText?.replace(/\s+/g, " ").trim() || "";
-        price = price.split(/\s+D\s+/)[0]?.replace(/^D\s*/, "AED ") || price;
-
-        const img = container.querySelector("img");
-        let image = img?.src || img?.getAttribute("data-src") || "";
-        // Fix protocol-relative URLs
-        if (image.startsWith("//")) image = "https:" + image;
-
-        if (title || price) {
-          results.push({
-            id: results.length + 1,
-            title: title || "N/A",
-            price: price || "N/A",
-            image: image || "",
-            url
-          });
+        let cards = [];
+        for (const sel of selectors) {
+          const els = document.querySelectorAll(sel);
+          if (els.length > 0) {
+            cards = [...els];
+            break;
+          }
         }
-      }
 
-      return results;
-    });
+        for (const card of cards) {
+          const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/product/"]');
+          if (!linkEl) continue;
 
-    return products;
+          const url = linkEl.href || linkEl.getAttribute("href") || "";
+          if (!url.includes("/product/") || seen.has(url)) continue;
+          seen.add(url);
+
+          const container = card.matches("a") ? card : card.closest("a") || card;
+
+          const title =
+            container.querySelector("h2")?.innerText?.trim() ||
+            container.querySelector("h3")?.innerText?.trim() ||
+            container.querySelector("h4")?.innerText?.trim() ||
+            container.querySelector("[class*='title']")?.innerText?.trim() ||
+            container.querySelector("[class*='name']")?.innerText?.trim();
+
+          const priceEl =
+            container.querySelector("[data-testid='price']") ||
+            container.querySelector("[class*='price']") ||
+            container.querySelector("[class*='Price']");
+          let price = priceEl?.innerText?.replace(/\s+/g, " ").trim() || "";
+          price = price.split(/\s+D\s+/)[0]?.replace(/^D\s*/, "AED ") || price;
+
+          const img = container.querySelector("img");
+          let image = img?.src || img?.getAttribute("data-src") || "";
+          if (image.startsWith("//")) image = "https:" + image;
+
+          if (title || price) {
+            results.push({
+              title: title || "N/A",
+              price: price || "N/A",
+              image: image || "",
+              url,
+              source: "Sharaf DG"
+            });
+          }
+        }
+        return results;
+      });
+      allProducts.push(...sharafProducts);
+      await page.close();
+    } catch (e) {
+      console.error("Error scraping Sharaf DG:", e.message);
+    }
+
+    // --- Scrape Lulu Hypermarket ---
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      );
+      await page.goto("https://gcc.luluhypermarket.com/en-ae/home-living-home-appliances/", {
+        waitUntil: "networkidle2",
+        timeout: 60000
+      });
+
+      await page.waitForFunction(
+        () => {
+          const productLinks = document.querySelectorAll('a[href*="/p/"]');
+          return productLinks.length >= 3;
+        },
+        { timeout: 30000 }
+      ).catch(() => console.log("Timeout waiting for Lulu links"));
+
+      await page.evaluate(async () => {
+        for (let i = 0; i < 6; i++) {
+          window.scrollBy(0, window.innerHeight);
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      });
+
+      const luluProducts = await page.evaluate(() => {
+        const results = [];
+        const seen = new Set();
+        
+        let cards = Array.from(document.querySelectorAll('.rounded-\\[32px\\].border'));
+        if (cards.length === 0) {
+          cards = Array.from(document.querySelectorAll('a[href*="/p/"]'));
+        }
+
+        for (const card of cards) {
+          const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/p/"]');
+          if (!linkEl) continue;
+
+          const url = linkEl.href || linkEl.getAttribute("href") || "";
+          if (!url.includes("/p/") || seen.has(url)) continue;
+          seen.add(url);
+
+          const container = card.matches("a") ? card : card.closest("a") || card;
+
+          const title =
+            container.querySelector("a.line-clamp-3")?.innerText?.trim() ||
+            container.querySelector("h2")?.innerText?.trim() ||
+            container.querySelector("h3")?.innerText?.trim() ||
+            linkEl.innerText?.trim();
+
+          const priceEl =
+            container.querySelector("div.flex.items-center.justify-start.gap-1\\.5 > div") ||
+            container.querySelector("[class*='price']");
+          let price = priceEl?.innerText?.replace(/\s+/g, " ").trim() || "";
+          if (price && !price.toLowerCase().includes('aed')) {
+              price = "AED " + price;
+          }
+
+          const img = container.querySelector("img");
+          let image = img?.src || img?.getAttribute("data-src") || "";
+          if (image.startsWith("//")) image = "https:" + image;
+
+          if (title && price) {
+            results.push({
+              title: title || "N/A",
+              price: price || "N/A",
+              image: image || "",
+              url,
+              source: "Lulu Hypermarket"
+            });
+          }
+        }
+        return results;
+      });
+      allProducts.push(...luluProducts);
+      await page.close();
+    } catch (e) {
+      console.error("Error scraping Lulu Hypermarket:", e.message);
+    }
+
+    // Add unique ids to combined list
+    return allProducts.map((p, index) => ({ id: index + 1, ...p }));
   } catch (err) {
     console.error("Scraper error:", err.message);
     throw err;

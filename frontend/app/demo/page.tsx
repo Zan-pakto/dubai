@@ -23,6 +23,7 @@ interface ScrapedProduct {
   price: string;
   image: string;
   url: string;
+  source?: string;
 }
 
 interface TrackedProduct {
@@ -68,6 +69,7 @@ export default function DemoDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [selectedView, setSelectedView] = useState<"all" | "cheaper" | "expensive">("all");
+  const [selectedSource, setSelectedSource] = useState<"all" | "Sharaf DG" | "Lulu Hypermarket">("all");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
   const [liveStatus, setLiveStatus] = useState(true);
@@ -164,7 +166,7 @@ export default function DemoDashboard() {
                 newAlerts.push({
                   id: `alert-${Date.now()}-${t.scraped.id}`,
                   productName: t.scraped.title,
-                  source: "Sharaf DG",
+                  source: t.scraped.source || "Unknown Source",
                   oldPrice: t.previousScrapedPrice,
                   newPrice: t.scrapedPriceNum,
                   dropPercentage: dropPct,
@@ -252,10 +254,17 @@ export default function DemoDashboard() {
         : selectedView === "cheaper"
           ? t.isRivalCheaper
           : !t.isRivalCheaper;
+    
+    // Check if the source matches our specific website filter
+    const productSource = t.scraped.source || "Sharaf DG";
+    const matchesSource = 
+      selectedSource === "all" || productSource === selectedSource;
+
     const matchesSearch =
       searchQuery === "" ||
       t.scraped.title.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesView && matchesSearch;
+      
+    return matchesView && matchesSource && matchesSearch;
   });
 
   // Summary stats
@@ -288,7 +297,7 @@ export default function DemoDashboard() {
           <div className="demo-loading-spinner" />
           <h2 className="demo-loading-title">Connecting to Scraper</h2>
           <p className="demo-loading-subtitle">
-            Fetching live products from Sharaf DG...
+            Fetching live products from Sharaf DG & Lulu Hypermarket...
           </p>
         </div>
       </>
@@ -359,7 +368,7 @@ export default function DemoDashboard() {
                 <span style={{ color: "#fff" }}> Dashboard</span>
               </h1>
               <p className="demo-subtitle">
-                Real-time competitor price monitoring — Sharaf DG UAE
+                Real-time competitor price monitoring — UAE Retailers
               </p>
             </div>
           </div>
@@ -662,7 +671,7 @@ export default function DemoDashboard() {
             className={`category-pill ${selectedView === "all" ? "active" : ""}`}
             onClick={() => setSelectedView("all")}
           >
-            All ({totalProducts})
+            All Outcomes ({totalProducts})
           </button>
           <button
             className={`category-pill ${selectedView === "cheaper" ? "active" : ""}`}
@@ -675,6 +684,27 @@ export default function DemoDashboard() {
             onClick={() => setSelectedView("expensive")}
           >
             ✅ You're Cheaper ({ourCheaperCount})
+          </button>
+          
+          <div style={{width: "1px", height: "24px", background: "#e2e8f0", margin: "0 8px"}}></div>
+
+          <button
+            className={`category-pill ${selectedSource === "all" ? "active" : ""}`}
+            onClick={() => setSelectedSource("all")}
+          >
+            All Sites
+          </button>
+          <button
+            className={`category-pill ${selectedSource === "Lulu Hypermarket" ? "active" : ""}`}
+            onClick={() => setSelectedSource("Lulu Hypermarket")}
+          >
+            🛍️ Lulu
+          </button>
+          <button
+            className={`category-pill ${selectedSource === "Sharaf DG" ? "active" : ""}`}
+            onClick={() => setSelectedSource("Sharaf DG")}
+          >
+            ⚡ Sharaf DG
           </button>
 
           <div className="search-box">
@@ -752,6 +782,16 @@ export default function DemoDashboard() {
 
                 {/* Product Info */}
                 <div className="product-card-top">
+                  {tracked.scraped.image && (
+                    <div className="product-image-wrap">
+                      <img
+                        src={tracked.scraped.image}
+                        alt={tracked.scraped.title}
+                        className="product-image"
+                        loading="lazy"
+                      />
+                    </div>
+                  )}
                   <div className="product-card-info">
                     <div className="product-source-label">
                       <svg
@@ -766,7 +806,7 @@ export default function DemoDashboard() {
                         <path d="M2 17l10 5 10-5" />
                         <path d="M2 12l10 5 10-5" />
                       </svg>
-                      Sharaf DG
+                      {tracked.scraped.source || "Sharaf DG"}
                     </div>
                     <h3 className="product-card-title">
                       {tracked.scraped.title}
@@ -777,21 +817,30 @@ export default function DemoDashboard() {
                       rel="noopener noreferrer"
                       className="product-link"
                     >
-                      View on Sharaf DG →
+                      View on {tracked.scraped.source || "Sharaf DG"} →
                     </a>
                   </div>
                 </div>
 
                 {/* Visual Price Bar */}
                 {tracked.scrapedPriceNum > 0 && tracked.ourPrice > 0 && (
-                  <div className="visual-price-bar-section">
-                    <div className="visual-bar-row">
-                      <span className="visual-bar-label">You</span>
-                      <div className="visual-bar-track">
+                  <div className="visual-price-bar-container">
+                    <div className="chart-grid-bg">
+                      <div className="chart-grid-line"></div>
+                      <div className="chart-grid-line"></div>
+                      <div className="chart-grid-line"></div>
+                      <div className="chart-grid-line"></div>
+                    </div>
+                    <div className="visual-price-bar-section">
+                      <div className="visual-bar-row">
+                        <span className="visual-bar-value">
+                          {Math.round(tracked.ourPrice).toLocaleString()}
+                        </span>
+                        <div className="visual-bar-track">
                         <div
                           className="visual-bar-fill our-bar-fill"
                           style={{
-                            width: `${Math.min(
+                            height: `${Math.min(
                               (tracked.ourPrice /
                                 Math.max(tracked.ourPrice, tracked.scrapedPriceNum)) *
                                 100,
@@ -800,17 +849,17 @@ export default function DemoDashboard() {
                           }}
                         />
                       </div>
-                      <span className="visual-bar-value">
-                        {Math.round(tracked.ourPrice).toLocaleString()}
-                      </span>
+                      <span className="visual-bar-label">You</span>
                     </div>
                     <div className="visual-bar-row">
-                      <span className="visual-bar-label">Rival</span>
+                      <span className="visual-bar-value">
+                        {Math.round(tracked.scrapedPriceNum).toLocaleString()}
+                      </span>
                       <div className="visual-bar-track">
                         <div
                           className="visual-bar-fill rival-bar-fill"
                           style={{
-                            width: `${Math.min(
+                            height: `${Math.min(
                               (tracked.scrapedPriceNum /
                                 Math.max(tracked.ourPrice, tracked.scrapedPriceNum)) *
                                 100,
@@ -819,11 +868,10 @@ export default function DemoDashboard() {
                           }}
                         />
                       </div>
-                      <span className="visual-bar-value">
-                        {Math.round(tracked.scrapedPriceNum).toLocaleString()}
-                      </span>
+                      <span className="visual-bar-label">Rival</span>
                     </div>
                   </div>
+                </div>
                 )}
 
                 {/* Price Comparison */}

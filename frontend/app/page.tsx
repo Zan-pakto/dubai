@@ -10,6 +10,7 @@ interface Product {
   price: string;
   image: string;
   url: string;
+  source?: string;
 }
 
 interface ApiResponse {
@@ -86,7 +87,7 @@ export default function Home() {
           <div className="text-center">
             <h2 className="text-2xl font-semibold mb-2">Loading Products</h2>
             <p className="text-[var(--text-muted)]">
-              Scraping latest deals from Sharaf DG...
+              Scraping latest deals from Sharaf DG and Lulu Hypermarket...
             </p>
           </div>
         </div>
@@ -135,7 +136,7 @@ export default function Home() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div>
               <h1 className="text-4xl md:text-5xl font-bold mb-3">
-                <span className="header-gradient">Sharaf DG</span>
+                <span className="header-gradient">Home Appliance</span>
                 <span className="text-white"> Deals</span>
               </h1>
               <p className="text-[var(--text-muted)] text-lg">
@@ -258,9 +259,20 @@ export default function Home() {
                   </div>
 
                   <div className="p-5 flex flex-col gap-4">
-                    <h3 className="text-lg font-semibold text-white leading-snug line-clamp-2 min-h-[3.2rem]">
-                      {product.title}
-                    </h3>
+                    <div className="flex flex-col gap-2">
+                      {product.source && (
+                        <span className={`self-start text-xs font-bold px-3 py-1 rounded-sm ${
+                          product.source === "Sharaf DG" 
+                            ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
+                            : "bg-green-600/20 text-green-400 border border-green-500/30"
+                        }`}>
+                          {product.source}
+                        </span>
+                      )}
+                      <h3 className="text-lg font-semibold text-white leading-snug line-clamp-2 min-h-[3.2rem]">
+                        {product.title}
+                      </h3>
+                    </div>
 
                     <div className="flex items-center justify-between gap-3">
                       <span className="price-badge">
@@ -306,7 +318,16 @@ export default function Home() {
                 rel="noopener noreferrer"
                 className="text-[var(--accent-primary)] hover:underline"
               >
-                Sharaf DG UAE
+                Sharaf DG
+              </a>
+              {" "}and{" "}
+              <a
+                href="https://gcc.luluhypermarket.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--accent-primary)] hover:underline"
+              >
+                Lulu Hypermarket
               </a>
             </p>
             <p>Prices and availability subject to change</p>

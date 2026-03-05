@@ -15,7 +15,7 @@ function getChromePath() {
   try {
     const chromePath = getChromePath();
     browser = await puppeteer.launch({
-      headless: false,
+      headless: "new",
       executablePath: chromePath || undefined,
       args: [
         "--no-sandbox",
@@ -30,7 +30,7 @@ function getChromePath() {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     );
 
-    const url = "https://uae.sharafdg.com/c/home_appliances/";
+    const url = "https://gcc.luluhypermarket.com/en-ae/home-living-home-appliances/";
     await page.goto(url, {
       waitUntil: "networkidle2",
       timeout: 60000
@@ -38,11 +38,11 @@ function getChromePath() {
 
     await page.waitForFunction(
       () => {
-        const productLinks = document.querySelectorAll('a[href*="/product/"]');
+        const productLinks = document.querySelectorAll('a[href*="/p/"], a[href*="/product/"]');
         return productLinks.length >= 3;
       },
       { timeout: 30000 }
-    );
+    ).catch(() => console.log("Timeout waiting for links"));
 
     await page.evaluate(async () => {
       for (let i = 0; i < 6; i++) {
@@ -59,24 +59,31 @@ function getChromePath() {
         '[data-testid="product-card"]',
         '[class*="product-card"]',
         '[class*="ProductCard"]',
-        'a[href*="/product/"]'
+        '[class*="product-item"]',
+        'a[href*="/product/"]',
+        'a[href*="/p/"]' // Lulu uses /p/ for products sometimes
       ];
 
       let cards = [];
       for (const sel of selectors) {
         const els = document.querySelectorAll(sel);
-        if (els.length > 0) {
+        if (els.length > 5) { // Ensure we got a decent number
           cards = [...els];
           break;
         }
       }
+      
+      // Fallback
+      if (cards.length === 0) {
+          cards = [...document.querySelectorAll('a[href*="/p/"]')];
+      }
 
       for (const card of cards) {
-        const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/product/"]');
+        const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/product/"], a[href*="/p/"]');
         if (!linkEl) continue;
 
         const url = linkEl.href || linkEl.getAttribute("href") || "";
-        if (!url.includes("/product/") || seen.has(url)) continue;
+        if (!(url.includes("/product/") || url.includes("/p/")) || seen.has(url)) continue;
         seen.add(url);
 
         const container = card.matches("a") ? card : card.closest("a") || card;
@@ -86,7 +93,8 @@ function getChromePath() {
           container.querySelector("h3")?.innerText?.trim() ||
           container.querySelector("h4")?.innerText?.trim() ||
           container.querySelector("[class*='title']")?.innerText?.trim() ||
-          container.querySelector("[class*='name']")?.innerText?.trim();
+          container.querySelector("[class*='name']")?.innerText?.trim() ||
+          linkEl.innerText?.trim();
 
         const priceEl =
           container.querySelector("[data-testid='price']") ||
@@ -96,7 +104,8 @@ function getChromePath() {
         price = price.split(/\s+D\s+/)[0]?.replace(/^D\s*/, "AED ") || price;
 
         const img = container.querySelector("img");
-        const image = img?.src || img?.getAttribute("data-src") || "";
+        let image = img?.src || img?.getAttribute("data-src") || "";
+        if (image.startsWith("//")) image = "https:" + image;
 
         if (title || price) {
           results.push({
@@ -111,11 +120,11 @@ function getChromePath() {
       return results;
     });
 
-    console.log("Total products:", products.length);
-    console.log(JSON.stringify(products.slice(0, 10), null, 2));
+    console.log("Total products scraped from lulu:", products.length);
+    console.log(JSON.stringify(products.slice(0, 5), null, 2));
+
   } catch (err) {
     console.error("Scraper error:", err.message);
-    throw err;
   } finally {
     if (browser) await browser.close();
   }
