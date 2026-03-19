@@ -1,7 +1,10 @@
-import puppeteer from "puppeteer";
-import { existsSync } from "fs";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { existsSync, writeFileSync } from "fs";
 import express from "express";
 import cors from "cors";
+
+puppeteer.use(StealthPlugin());
 
 const app = express();
 app.use(cors());
@@ -16,302 +19,281 @@ function getChromePath() {
   return paths.find((p) => existsSync(p));
 }
 
-// Cache for scraped products
+// Site Configurations - Maximum Robustness
+const SITES = [
+  {
+    name: "Sharaf DG",
+    categories: [
+      "https://uae.sharafdg.com/home-kitchen-appliances/",
+      "https://uae.sharafdg.com/electronics/",
+      "https://uae.sharafdg.com/phones-wearables/"
+    ],
+    paginationPattern: "page_number=",
+    startPage: 1,
+    selectors: {
+      card: '[data-testid="product-card"], .product-card, .product-item, .item, .product-card-wrap',
+      link: 'a',
+      title: 'h2, h3, h4, .title, .name, [class*="title"]',
+      price: '.price, .product-price, [data-testid="price"], [class*="price"]',
+      image: 'img'
+    }
+  },
+  {
+    name: "Lulu Hypermarket",
+    categories: [
+      "https://gcc.luluhypermarket.com/en-ae/home-living-home-appliances/",
+      "https://gcc.luluhypermarket.com/en-ae/electronics/",
+      "https://gcc.luluhypermarket.com/en-ae/mobiles-tablets/"
+    ],
+    paginationPattern: "page=",
+    startPage: 0,
+    selectors: {
+      card: '.product-item, .item, [data-testid="product-card"], div.rounded-lg.border, a[href*="/p/"]',
+      link: 'a[href*="/p/"]',
+      title: 'h2, h3, .title, .name',
+      price: '.price, .current-price, [class*="price"]',
+      image: 'img'
+    }
+  },
+  {
+    name: "Carrefour UAE",
+    categories: [
+      "https://www.carrefouruae.com/mafuae/en/c/NF4000000",
+      "https://www.carrefouruae.com/mafuae/en/c/NF3000000",
+      "https://www.carrefouruae.com/mafuae/en/c/NF2000000"
+    ],
+    paginationPattern: "currentPage=",
+    startPage: 1, // Carrefour starts at 1
+    selectors: {
+      card: 'a[href*="/p/"], [data-testid="product_card"], .product-card',
+      link: 'a',
+      title: 'span, .title, h3, h4',
+      price: '[data-testid="price"], .css-1n9n6n9, .price',
+      image: 'img'
+    }
+  },
+  {
+    name: "Amazon AE",
+    categories: [
+      "https://www.amazon.ae/s?k=home+appliances",
+      "https://www.amazon.ae/s?k=electronics",
+      "https://www.amazon.ae/s?k=mobiles"
+    ],
+    paginationPattern: "page=",
+    startPage: 1,
+    selectors: {
+      card: '[data-component-type="s-search-result"], .s-result-item, .s-card-container',
+      link: 'h2 a',
+      title: 'h2 a span, .a-size-base-plus',
+      price: 'span.a-price-whole, .a-price',
+      image: 'img.s-image'
+    }
+  },
+  {
+    name: "Rattan Elect",
+    categories: [
+      "https://rattanelect.com/product-tag/home-appliances/",
+      "https://rattanelect.com/product-tag/electronics/"
+    ],
+    paginationPattern: "page/",
+    isPathPagination: true,
+    startPage: 1,
+    selectors: {
+      card: 'li.product, .product-item',
+      link: 'a',
+      title: '.woocommerce-loop-product__title, h2, h3',
+      price: '.price, .woocommerce-Price-amount',
+      image: 'img'
+    }
+  }
+];
+
 let cachedProducts = [];
 let lastScrapeTime = null;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 30 * 60 * 1000; 
 
-async function scrapeProducts() {
+async function scrapeCategory(browser, siteConfig, categoryUrl) {
+  console.log(`\n📡 [${siteConfig.name}] Exploring: ${categoryUrl}`);
+  const page = await browser.newPage();
+  
+  // High-def viewport to trigger more content
+  await page.setViewport({ width: 1600, height: 1000 });
+  await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36");
+
+  const results = [];
+  const maxPages = 15;
+
+  for (let i = 0; i < maxPages; i++) {
+    const pageNum = siteConfig.startPage + i;
+    const cleanBase = categoryUrl.replace(/\/+$/, "").replace(/\?+$/, "");
+    let pageUrl = cleanBase;
+    
+    if (i > 0 || siteConfig.startPage !== 0) {
+      if (siteConfig.isPathPagination) {
+        pageUrl = `${cleanBase}/${siteConfig.paginationPattern}${pageNum}/`;
+      } else {
+        const separator = cleanBase.includes("?") ? "&" : "?";
+        pageUrl = `${cleanBase}${separator}${siteConfig.paginationPattern}${pageNum}`;
+      }
+    }
+
+    console.log(`   - [${siteConfig.name}] Loading Page ${pageNum}...`);
+    try {
+      // Extra stealth delay
+      if (i > 0) await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
+      
+      const response = await page.goto(pageUrl, { 
+          waitUntil: ["networkidle2", "domcontentloaded"], 
+          timeout: 90000 
+      });
+
+      // Simple bypass for "Press & Hold" screens - just wait for them to clear or for content to appear
+      await new Promise(r => setTimeout(r, 4000));
+
+      // Scroll with variable speed to look human
+      await page.evaluate(async () => {
+        for (let j = 0; j < 10; j++) {
+            const amount = 500 + Math.random() * 500;
+            window.scrollBy(0, amount);
+            await new Promise(r => setTimeout(r, 400 + Math.random() * 400));
+        }
+      });
+
+      // Dynamic Selector Strategy
+      const products = await page.evaluate((config) => {
+        const items = [];
+        const seen = new Set();
+        
+        // Strategy 1: Configured Selector
+        let cards = document.querySelectorAll(config.selectors.card);
+        
+        // Strategy 2: If fail, try broad "product" classes
+        if (cards.length < 5) {
+            cards = document.querySelectorAll('.product, .item, .card, [class*="product"]');
+        }
+
+        if (!cards.length) return [];
+
+        for (const card of Array.from(cards)) {
+          const anchor = card.tagName === "A" ? card : (card.querySelector('a') || card.closest('a'));
+          if (!anchor || !anchor.href) continue;
+
+          let url = anchor.href;
+          if (seen.has(url)) continue;
+          seen.add(url);
+
+          const scope = card;
+          const title = (
+              scope.querySelector(config.selectors.title)?.innerText || 
+              anchor.innerText || 
+              scope.querySelector('h2, h3, h4')?.innerText || 
+              ""
+          ).trim();
+
+          const price = (
+              scope.querySelector(config.selectors.price)?.innerText || 
+              scope.querySelector('[class*="price"]')?.innerText || 
+              ""
+          ).trim();
+
+          const img = scope.querySelector(config.selectors.image) || scope.querySelector('img');
+          let image = img?.src || img?.getAttribute('data-src') || img?.getAttribute('srcset')?.split(' ')[0] || "";
+          
+          if (image.startsWith("//")) image = "https:" + image;
+
+          if (title && title.length > 5 && (price || image)) {
+            items.push({ title, price, image, url, source: config.name });
+          }
+        }
+        return items;
+      }, siteConfig);
+
+      if (products.length === 0) {
+          console.log(`   - [${siteConfig.name}] No products caught on page ${pageNum}. Ending crawl.`);
+          break;
+      }
+
+      const unique = products.filter(p => !results.some(existing => existing.url === p.url));
+      results.push(...unique);
+      console.log(`   - [${siteConfig.name}] Syncing ${unique.length} new items (Global: ${results.length})`);
+      
+      if (unique.length === 0 && i > 0) break; 
+
+    } catch (e) {
+      console.error(`   - ❌ [${siteConfig.name}] Failed page ${pageNum}: ${e.message}`);
+      break;
+    }
+  }
+
+  await page.close();
+  return results;
+}
+
+async function scrapeEverything() {
   let browser;
   try {
     const chromePath = getChromePath();
+    console.log("🛠️  Waking up the Master Scraper...");
     browser = await puppeteer.launch({
-      headless: "new",
+      headless: false,
       executablePath: chromePath || undefined,
       args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled"
+          "--no-sandbox", 
+          "--disable-setuid-sandbox", 
+          "--disable-blink-features=AutomationControlled",
+          "--start-maximized"
       ]
     });
 
-    const allProducts = [];
-
-    // --- Scrape Sharaf DG ---
-    try {
-      const page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      );
-      await page.goto("https://uae.sharafdg.com/c/home_appliances/", {
-        waitUntil: "networkidle2",
-        timeout: 60000
-      });
-
-      await page.waitForFunction(
-        () => {
-          const productLinks = document.querySelectorAll('a[href*="/product/"]');
-          return productLinks.length >= 3;
-        },
-        { timeout: 30000 }
-      ).catch(() => console.log("Timeout waiting for Sharaf DG links"));
-
-      await page.evaluate(async () => {
-        for (let i = 0; i < 6; i++) {
-          window.scrollBy(0, window.innerHeight);
-          await new Promise((r) => setTimeout(r, 2000));
+    const finalResults = [];
+    // Sequential process for maximum safety against site-wide bans
+    for (const site of SITES) {
+        console.log(`\n--- 🏢 SYNCING RETAILER: ${site.name} ---`);
+        for (const url of site.categories) {
+            const data = await scrapeCategory(browser, site, url);
+            finalResults.push(...data);
         }
-      });
-
-      const sharafProducts = await page.evaluate(() => {
-        const results = [];
-        const seen = new Set();
-        const selectors = [
-          '[data-testid="product-card"]',
-          '[class*="product-card"]',
-          '[class*="ProductCard"]',
-          'a[href*="/product/"]'
-        ];
-
-        let cards = [];
-        for (const sel of selectors) {
-          const els = document.querySelectorAll(sel);
-          if (els.length > 0) {
-            cards = [...els];
-            break;
-          }
-        }
-
-        for (const card of cards) {
-          const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/product/"]');
-          if (!linkEl) continue;
-
-          const url = linkEl.href || linkEl.getAttribute("href") || "";
-          if (!url.includes("/product/") || seen.has(url)) continue;
-          seen.add(url);
-
-          const container = card.matches("a") ? card : card.closest("a") || card;
-
-          const title =
-            container.querySelector("h2")?.innerText?.trim() ||
-            container.querySelector("h3")?.innerText?.trim() ||
-            container.querySelector("h4")?.innerText?.trim() ||
-            container.querySelector("[class*='title']")?.innerText?.trim() ||
-            container.querySelector("[class*='name']")?.innerText?.trim();
-
-          const priceEl =
-            container.querySelector("[data-testid='price']") ||
-            container.querySelector("[class*='price']") ||
-            container.querySelector("[class*='Price']");
-          let price = priceEl?.innerText?.replace(/\s+/g, " ").trim() || "";
-          price = price.split(/\s+D\s+/)[0]?.replace(/^D\s*/, "AED ") || price;
-
-          const img = container.querySelector("img");
-          let image = img?.src || img?.getAttribute("data-src") || "";
-          if (image.startsWith("//")) image = "https:" + image;
-
-          if (title || price) {
-            results.push({
-              title: title || "N/A",
-              price: price || "N/A",
-              image: image || "",
-              url,
-              source: "Sharaf DG"
-            });
-          }
-        }
-        return results;
-      });
-      allProducts.push(...sharafProducts);
-      await page.close();
-    } catch (e) {
-      console.error("Error scraping Sharaf DG:", e.message);
     }
 
-    // --- Scrape Lulu Hypermarket ---
-    try {
-      const page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      );
-      await page.goto("https://gcc.luluhypermarket.com/en-ae/home-living-home-appliances/", {
-        waitUntil: "networkidle2",
-        timeout: 60000
-      });
-
-      await page.waitForFunction(
-        () => {
-          const productLinks = document.querySelectorAll('a[href*="/p/"]');
-          return productLinks.length >= 3;
-        },
-        { timeout: 30000 }
-      ).catch(() => console.log("Timeout waiting for Lulu links"));
-
-      await page.evaluate(async () => {
-        for (let i = 0; i < 6; i++) {
-          window.scrollBy(0, window.innerHeight);
-          await new Promise((r) => setTimeout(r, 2000));
-        }
-      });
-
-      const luluProducts = await page.evaluate(() => {
-        const results = [];
-        const seen = new Set();
-        
-        let cards = Array.from(document.querySelectorAll('.rounded-\\[32px\\].border'));
-        if (cards.length === 0) {
-          cards = Array.from(document.querySelectorAll('a[href*="/p/"]'));
-        }
-
-        for (const card of cards) {
-          const linkEl = card.matches("a") ? card : card.querySelector('a[href*="/p/"]');
-          if (!linkEl) continue;
-
-          const url = linkEl.href || linkEl.getAttribute("href") || "";
-          if (!url.includes("/p/") || seen.has(url)) continue;
-          seen.add(url);
-
-          const container = card.matches("a") ? card : card.closest("a") || card;
-
-          const title =
-            container.querySelector("a.line-clamp-3")?.innerText?.trim() ||
-            container.querySelector("h2")?.innerText?.trim() ||
-            container.querySelector("h3")?.innerText?.trim() ||
-            linkEl.innerText?.trim();
-
-          const priceEl =
-            container.querySelector("div.flex.items-center.justify-start.gap-1\\.5 > div") ||
-            container.querySelector("[class*='price']");
-          let price = priceEl?.innerText?.replace(/\s+/g, " ").trim() || "";
-          if (price && !price.toLowerCase().includes('aed')) {
-              price = "AED " + price;
-          }
-
-          const img = container.querySelector("img");
-          let image = img?.src || img?.getAttribute("data-src") || "";
-          if (image.startsWith("//")) image = "https:" + image;
-
-          if (title && price) {
-            results.push({
-              title: title || "N/A",
-              price: price || "N/A",
-              image: image || "",
-              url,
-              source: "Lulu Hypermarket"
-            });
-          }
-        }
-        return results;
-      });
-      allProducts.push(...luluProducts);
-      await page.close();
-    } catch (e) {
-      console.error("Error scraping Lulu Hypermarket:", e.message);
-    }
-
-    // Add unique ids to combined list
-    return allProducts.map((p, index) => ({ id: index + 1, ...p }));
+    console.log(`\n✅ ALL SITES SYNCED: ${finalResults.length} total listings in catalog.`);
+    return finalResults.map((p, idx) => ({ id: idx + 1, ...p }));
   } catch (err) {
-    console.error("Scraper error:", err.message);
+    console.error("Critical System Failure:", err);
     throw err;
   } finally {
     if (browser) await browser.close();
   }
 }
 
-// API endpoint to get products
 app.get("/api/products", async (req, res) => {
   try {
-    const now = Date.now();
-    
-    // Return cached data if still valid
-    if (cachedProducts.length > 0 && lastScrapeTime && (now - lastScrapeTime < CACHE_DURATION)) {
-      console.log("Returning cached products...");
-      return res.json({
-        success: true,
-        count: cachedProducts.length,
-        cached: true,
-        products: cachedProducts
-      });
+    if (cachedProducts.length > 0 && lastScrapeTime && (Date.now() - lastScrapeTime < CACHE_DURATION)) {
+      return res.json({ success: true, count: cachedProducts.length, cached: true, products: cachedProducts });
     }
-
-    console.log("Scraping fresh products...");
-    cachedProducts = await scrapeProducts();
-    lastScrapeTime = now;
-
-    res.json({
-      success: true,
-      count: cachedProducts.length,
-      cached: false,
-      products: cachedProducts
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// API endpoint to force refresh
-app.get("/api/products/refresh", async (req, res) => {
-  try {
-    console.log("Force refreshing products...");
-    cachedProducts = await scrapeProducts();
+    cachedProducts = await scrapeEverything();
     lastScrapeTime = Date.now();
-
-    res.json({
-      success: true,
-      count: cachedProducts.length,
-      products: cachedProducts
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+    res.json({ success: true, count: cachedProducts.length, cached: false, products: cachedProducts });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
-// Image proxy to avoid hotlinking issues with Sharaf DG images
+app.get("/api/products/refresh", async (req, res) => {
+    try {
+      cachedProducts = await scrapeEverything();
+      lastScrapeTime = Date.now();
+      res.json({ success: true, count: cachedProducts.length, products: cachedProducts });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
 app.get("/api/image-proxy", async (req, res) => {
   try {
-    const imageUrl = req.query.url;
-    if (!imageUrl) {
-      return res.status(400).json({ error: "Missing url parameter" });
-    }
-
-    const response = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": "https://uae.sharafdg.com/",
-        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8"
-      }
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: "Failed to fetch image" });
-    }
-
-    const contentType = response.headers.get("content-type") || "image/jpeg";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 24 hours
-
-    const arrayBuffer = await response.arrayBuffer();
-    res.send(Buffer.from(arrayBuffer));
-  } catch (error) {
-    res.status(500).json({ error: "Image proxy error" });
-  }
+    const url = req.query.url;
+    if (!url) return res.status(400).send("No URL");
+    const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0..." } });
+    const buffer = await resp.arrayBuffer();
+    res.setHeader("Content-Type", resp.headers.get("content-type") || "image/jpeg");
+    res.send(Buffer.from(buffer));
+  } catch (err) { res.status(500).send("Proxy error"); }
 });
 
-// Health check
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📦 Products API: http://localhost:${PORT}/api/products`);
-  console.log(`🖼️  Image Proxy: http://localhost:${PORT}/api/image-proxy?url=...`);
-});
+const PORT = 3001;
+app.listen(PORT, () => console.log(`🚀 MASTER ENGINE: http://localhost:${PORT}`));

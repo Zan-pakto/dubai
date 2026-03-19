@@ -1,339 +1,260 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import Image from "next/image";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from "recharts";
+import "./page.css";
 
-interface Product {
+// ─── Types ─────────────────────────────────────────────
+interface ScrapedProduct {
   id: number;
   title: string;
   price: string;
   image: string;
   url: string;
-  source?: string;
+  source: string;
 }
 
-interface ApiResponse {
-  success: boolean;
-  count: number;
-  cached: boolean;
-  products: Product[];
-  error?: string;
+interface TrackedProduct {
+  scraped: ScrapedProduct;
+  scrapedPriceNum: number;
+  ourPrice: number;
+  priceDiff: number;
+  priceDiffPct: number;
+  isRivalCheaper: boolean;
 }
 
-export default function Home() {
-  const [products, setProducts] = useState<Product[]>([]);
+// ─── Helpers ─────────────────────────────────────────
+function parsePriceToNumber(priceStr: string): number {
+  if (!priceStr) return 0;
+  const cleaned = priceStr.replace(/[^0-9.,]/g, "").replace(/,/g, "");
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+function formatAED(num: number): string {
+  return `AED ${num.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+const SOURCES = ["Amazon AE", "Carrefour UAE", "Sharaf DG", "Lulu Hypermarket", "Rattan Elect"];
+
+export default function UnifiedDashboard() {
+  const [products, setProducts] = useState<ScrapedProduct[]>([]);
+  const [trackedProducts, setTrackedProducts] = useState<TrackedProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [isCached, setIsCached] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedSource, setSelectedSource] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
 
   const API_URL = "http://localhost:3001";
 
-  // Proxy image URL through our backend to avoid hotlinking issues
-  const getProxiedImage = (imageUrl: string) => {
-    if (!imageUrl) return "";
-    return `${API_URL}/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
-  };
-
-  const fetchProducts = async (forceRefresh = false) => {
-    try {
-      if (forceRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      setError(null);
-
-      const endpoint = forceRefresh ? "/api/products/refresh" : "/api/products";
-      const response = await fetch(`${API_URL}${endpoint}`);
-      const data: ApiResponse = await response.json();
-
-      if (data.success) {
-        setProducts(data.products);
-        setIsCached(data.cached || false);
-        setLastUpdated(new Date());
-      } else {
-        setError(data.error || "Failed to fetch products");
-      }
-    } catch (err) {
-      setError("Unable to connect to server. Make sure the backend is running on port 3001.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchProducts();
+  // Build simulated "Our Price" logic
+  const buildTrackedList = useCallback((scraped: ScrapedProduct[]) => {
+    return scraped.map((p) => {
+      const spNum = parsePriceToNumber(p.price);
+      // Simulate our catalog price (roughly same range)
+      const ourPrice = Math.round(spNum * (0.95 + Math.random() * 0.1) * 10) / 10;
+      const diff = ourPrice - spNum;
+      const pct = ourPrice > 0 ? (diff / ourPrice) * 100 : 0;
+      
+      return {
+        scraped: p,
+        scrapedPriceNum: spNum,
+        ourPrice,
+        priceDiff: diff,
+        priceDiffPct: Math.round(pct * 100) / 100,
+        isRivalCheaper: spNum < ourPrice
+      };
+    });
   }, []);
 
-  const formatPrice = (price: string) => {
-    // Clean up the price string
-    const cleaned = price.replace(/[^\d.,AED\s]/g, "").trim();
-    if (cleaned.includes("AED")) {
-      return cleaned;
+  const fetchProducts = useCallback(async (force = false) => {
+    try {
+      force ? setIsRefreshing(true) : setLoading(true);
+      setError(null);
+
+      const res = await fetch(`${API_URL}/api/products${force ? '/refresh' : ''}`);
+      const data = await res.json();
+
+      if (data.success && data.products) {
+        setProducts(data.products);
+        setTrackedProducts(buildTrackedList(data.products));
+        setLastScanTime(new Date());
+      } else {
+        setError(data.error || "No data received");
+      }
+    } catch (err) {
+      setError("Connect to Backend at 3001");
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
     }
-    return `AED ${cleaned}`;
-  };
+  }, [buildTrackedList]);
 
-  if (loading) {
-    return (
-      <>
-        <div className="gradient-bg" />
-        <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
-          <div className="spinner" />
-          <div className="text-center">
-            <h2 className="text-2xl font-semibold mb-2">Loading Products</h2>
-            <p className="text-[var(--text-muted)]">
-              Scraping latest deals from Sharaf DG and Lulu Hypermarket...
-            </p>
-          </div>
-        </div>
-      </>
-    );
-  }
+  useEffect(() => { fetchProducts(); }, []);
 
-  if (error) {
-    return (
-      <>
-        <div className="gradient-bg" />
-        <div className="min-h-screen flex items-center justify-center p-8">
-          <div className="error-container glass-card max-w-md">
-            <div className="error-icon">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-semibold">Connection Error</h2>
-            <p className="text-[var(--text-muted)]">{error}</p>
-            <button
-              onClick={() => fetchProducts()}
-              className="refresh-button mt-4"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M23 4v6h-6" />
-                <path d="M1 20v-6h6" />
-                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-              </svg>
-              Try Again
-            </button>
-          </div>
-        </div>
-      </>
-    );
-  }
+  const filtered = useMemo(() => {
+    return trackedProducts.filter(t => {
+      const matchesSource = selectedSource === "all" || t.scraped.source === selectedSource;
+      const matchesSearch = t.scraped.title.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesSource && matchesSearch;
+    });
+  }, [trackedProducts, selectedSource, searchQuery]);
+
+  // Stats
+  const rivalWins = trackedProducts.filter(t => t.isRivalCheaper).length;
+  const ourWins = trackedProducts.length - rivalWins;
+  const avgGap = trackedProducts.reduce((acc, t) => acc + t.priceDiffPct, 0) / (trackedProducts.length || 1);
+
+  if (loading) return (
+    <div className="demo-loading-screen">
+      <div className="demo-loading-spinner" />
+      <h2 className="demo-loading-title">UAE Price Monitoring</h2>
+      <p className="demo-loading-subtitle">Syncing with Amazon, Carrefour, Lulu, Sharaf and Rattan...</p>
+    </div>
+  );
 
   return (
-    <>
-      <div className="gradient-bg" />
-      <div className="min-h-screen p-6 md:p-10">
-        {/* Header */}
-        <header className="max-w-7xl mx-auto mb-10">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <div>
-              <h1 className="text-4xl md:text-5xl font-bold mb-3">
-                <span className="header-gradient">Home Appliance</span>
-                <span className="text-white"> Deals</span>
-              </h1>
-              <p className="text-[var(--text-muted)] text-lg">
-                Live scraped home appliance deals from UAE
-              </p>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-              <div className="stats-bar">
-                <div className="stat-item">
-                  <span className="stat-label">Products</span>
-                  <span className="stat-value">{products.length}</span>
-                </div>
-                {lastUpdated && (
-                  <div className="stat-item">
-                    <span className="stat-label">Updated</span>
-                    <span className="stat-value text-base">
-                      {lastUpdated.toLocaleTimeString()}
-                    </span>
-                  </div>
-                )}
-                {isCached && (
-                  <div className="stat-item">
-                    <span className="stat-label">Status</span>
-                    <span className="text-[var(--gold)] font-semibold flex items-center gap-1">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                      </svg>
-                      Cached
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <Link
-                href="/demo"
-                className="refresh-button"
-                style={{ textDecoration: "none", background: "linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.2))", borderColor: "rgba(245, 158, 11, 0.4)", color: "#fbbf24" }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                </svg>
-                PriceWatch Demo
-              </Link>
-
-              <button
-                onClick={() => fetchProducts(true)}
-                disabled={refreshing}
-                className="refresh-button"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className={refreshing ? "animate-spin" : ""}
-                >
-                  <path d="M23 4v6h-6" />
-                  <path d="M1 20v-6h6" />
-                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-                </svg>
-                {refreshing ? "Refreshing..." : "Refresh Data"}
-              </button>
-            </div>
+    <div className="min-h-screen p-6">
+      <div className="demo-bg" />
+      
+      <header className="demo-header">
+        <div className="demo-header-left">
+          <div className="demo-badge">REAL-TIME</div>
+          <div>
+            <h1 className="demo-title"><span className="header-gradient">PriceWatch</span> Dashboard</h1>
+            <p className="demo-subtitle">Multi-retailer price comparison engine — Live from Dubai</p>
           </div>
-        </header>
+        </div>
+        <div className="flex items-center gap-4">
+            <div className="live-indicator"><span className="live-dot" /> LIVE 5 SITES</div>
+            <button className="simulate-btn" onClick={() => fetchProducts(true)} disabled={isRefreshing}>
+                {isRefreshing ? "Scanning..." : "Sync All Sources"}
+            </button>
+        </div>
+      </header>
 
-        {/* Products Grid */}
-        <main className="max-w-7xl mx-auto">
-          {products.length === 0 ? (
-            <div className="text-center py-20">
-              <p className="text-[var(--text-muted)] text-xl">No products found</p>
-            </div>
-          ) : (
-            <div className="products-grid">
-              {products.map((product, index) => (
-                <article
-                  key={product.id || index}
-                  className={`glass-card fade-in-up opacity-0`}
-                  style={{ animationDelay: `${Math.min(index * 0.05, 0.5)}s` }}
-                >
-                  <div className="product-image-container">
-                    {product.image ? (
-                      <img
-                        src={getProxiedImage(product.image)}
-                        alt={product.title}
-                        className="product-image"
-                        loading="lazy"
-                        onError={(e) => {
-                          // If proxy fails, try direct URL as fallback
-                          const target = e.target as HTMLImageElement;
-                          if (target.src.includes('/api/image-proxy')) {
-                            target.src = product.image;
-                          } else {
-                            // Show placeholder if both fail
-                            target.style.display = 'none';
-                            target.parentElement!.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;opacity:0.3"><svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>';
-                          }
-                        }}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <svg
-                          width="60"
-                          height="60"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1"
-                          className="text-[var(--text-muted)] opacity-30"
-                        >
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <polyline points="21 15 16 10 5 21" />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-5 flex flex-col gap-4">
-                    <div className="flex flex-col gap-2">
-                      {product.source && (
-                        <span className={`self-start text-xs font-bold px-3 py-1 rounded-sm ${
-                          product.source === "Sharaf DG" 
-                            ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
-                            : "bg-green-600/20 text-green-400 border border-green-500/30"
-                        }`}>
-                          {product.source}
-                        </span>
-                      )}
-                      <h3 className="text-lg font-semibold text-white leading-snug line-clamp-2 min-h-[3.2rem]">
-                        {product.title}
-                      </h3>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="price-badge">
-                        {formatPrice(product.price)}
-                      </span>
-                    </div>
-
-                    <a
-                      href={product.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="view-button w-full"
-                    >
-                      View Deal
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                        <polyline points="15 3 21 3 21 9" />
-                        <line x1="10" y1="14" x2="21" y2="3" />
-                      </svg>
-                    </a>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </main>
-
-        {/* Footer */}
-        <footer className="max-w-7xl mx-auto mt-16 pt-8 border-t border-[var(--card-border)]">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-[var(--text-muted)] text-sm">
-            <p>
-              Data scraped from{" "}
-              <a
-                href="https://uae.sharafdg.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--accent-primary)] hover:underline"
-              >
-                Sharaf DG
-              </a>
-              {" "}and{" "}
-              <a
-                href="https://gcc.luluhypermarket.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--accent-primary)] hover:underline"
-              >
-                Lulu Hypermarket
-              </a>
-            </p>
-            <p>Prices and availability subject to change</p>
+      <div className="stats-grid">
+        <div className="stat-card">
+          <div className="stat-card-icon stat-icon-blue">📈</div>
+          <div className="stat-card-info">
+            <span className="stat-card-label">Total Listings</span>
+            <span className="stat-card-value">{products.length}</span>
           </div>
-        </footer>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-icon stat-icon-red">💸</div>
+          <div className="stat-card-info">
+            <span className="stat-card-label">Rival Cheaper</span>
+            <span className="stat-card-value text-red-500">{rivalWins}</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-icon stat-icon-green">🎯</div>
+          <div className="stat-card-info">
+            <span className="stat-card-label">You're Cheaper</span>
+            <span className="stat-card-value text-green-500">{ourWins}</span>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-icon stat-icon-purple">📊</div>
+          <div className="stat-card-info">
+            <span className="stat-card-label">Avg. Margin Gap</span>
+            <span className="stat-card-value">{avgGap.toFixed(1)}%</span>
+          </div>
+        </div>
       </div>
-    </>
+
+      <div className="charts-section">
+        <div className="chart-card">
+          <h3 className="chart-title">Market Dominance</h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <PieChart>
+              <Pie data={[{name:"You", value:ourWins}, {name:"Rivals", value:rivalWins}]} cx="50%" cy="50%" innerRadius={60} outerRadius={80} dataKey="value">
+                <Cell fill="#16a34a" /><Cell fill="#7c3aed" />
+              </Pie>
+              <Tooltip />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="chart-card">
+          <h3 className="chart-title">Live Price Deltas (Top 10)</h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={trackedProducts.slice(0, 10).map(t => ({ name: t.scraped.title.substring(0, 15), "Our Price": t.ourPrice, "Competitor": t.scrapedPriceNum }))}>
+              <XAxis dataKey="name" fontSize={10} angle={-15} textAnchor="end" height={40} />
+              <YAxis fontSize={10} />
+              <Tooltip />
+              <Bar dataKey="Our Price" fill="#16a34a" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Competitor" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="category-filter">
+          <button className={`category-pill ${selectedSource === 'all' ? 'active' : ''}`} onClick={() => setSelectedSource('all')}>All Sites</button>
+          {SOURCES.map(s => (
+              <button key={s} className={`category-pill ${selectedSource === s ? 'active' : ''}`} onClick={() => setSelectedSource(s)}>{s}</button>
+          ))}
+          <div className="search-box">
+              <input type="text" placeholder="Filter products..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="search-input" />
+          </div>
+      </div>
+
+      <div className="comparison-grid">
+        {filtered.map((t, idx) => (
+          <div key={`${t.scraped.id}-${idx}`} className={`comparison-card p-4 ${t.isRivalCheaper ? 'rival-winning' : 'our-winning'}`}>
+            <div className="flex items-start gap-4 mb-4">
+              <div className="product-image-wrap">
+                <img src={`http://localhost:3001/api/image-proxy?url=${encodeURIComponent(t.scraped.image)}`} alt="" className="product-image" onError={(e) => (e.currentTarget.src = t.scraped.image)} />
+              </div>
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className={`source-badge ${t.scraped.source === "Amazon AE" ? "source-amazon" : t.scraped.source === "Sharaf DG" ? "source-sharaf" : t.scraped.source === "Carrefour UAE" ? "source-carrefour" : t.scraped.source === "Rattan Elect" ? "source-rattan" : "source-lulu"}`}>
+                    {t.scraped.source}
+                </span>
+                <h4 className="font-bold text-sm line-clamp-2" title={t.scraped.title}>{t.scraped.title}</h4>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-end border-t pt-4">
+                <div className="flex flex-col">
+                    <span className="text-[10px] text-gray-400 font-bold">YOUR PRICE</span>
+                    <span className="price-value our-price">{formatAED(t.ourPrice)}</span>
+                </div>
+                <div className="flex flex-col items-end">
+                    <span className="text-[10px] text-gray-400 font-bold">COMPETITOR</span>
+                    <span className={`price-value rival-price ${t.isRivalCheaper ? 'text-purple-600' : ''}`}>{formatAED(t.scrapedPriceNum)}</span>
+                </div>
+            </div>
+
+            <div className="mt-4 flex justify-between items-center">
+                <span className={`text-xs font-bold ${t.priceDiffPct < 0 ? 'text-green-500' : 'text-purple-500'}`}>
+                    {t.priceDiffPct < 0 ? 'CHEAPER BY' : 'EXPENSIVE BY'} {Math.abs(t.priceDiffPct)}%
+                </span>
+                <a href={t.scraped.url} target="_blank" className="text-[10px] font-bold text-blue-500 hover:underline">VISIT SITE →</a>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <footer className="mt-10 pt-10 border-t text-center text-gray-400 text-xs">
+          <p>© 2025 PriceWatch UAE — Multi-Retailer Analytics Engine</p>
+          <p className="mt-2">Tracking Amazon, Carrefour, Lulu, Sharaf DG and Rattan Elect</p>
+      </footer>
+    </div>
   );
 }
